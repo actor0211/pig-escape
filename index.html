@@ -141,7 +141,7 @@ async function reload() { ENTRIES = (await all()).sort((a, b) => b.ts - a.ts); }
 
 const SKEY = 'pigescape-settings';
 const S = Object.assign({
-  apiKey: '', startDate: '', goalWeight: 75, proteinTarget: 120, ladder: {}, badDay: '', coachMsg: '', focus: 'en', book: { title: '', total: 0, page: 0 }
+  apiKey: '', startDate: '', goalWeight: 75, proteinTarget: 120, ladder: {}, badDay: '', coachMsg: '', focus: 'en', book: { title: '', total: 0, page: 0 }, bedAt: 0
 }, JSON.parse(localStorage.getItem(SKEY) || '{}'));
 function saveS() { localStorage.setItem(SKEY, JSON.stringify(S)); }
 
@@ -372,10 +372,11 @@ function renderToday() {
   const workDays = new Set(wk.filter(e => e.kind === 'workout').map(e => e.date)).size;
   const days = {}; wk.filter(e => e.kind === 'meal').forEach(m => days[m.date] = (days[m.date] || 0) + (m.protein || 0));
   const proDays = Object.values(days).filter(v => v >= S.proteinTarget).length;
-  const sleepDays = wk.filter(e => e.kind === 'mood' && e.sleep >= 7).length;
+  const sleepDays = new Set(wk.filter(e => (e.kind === 'mood' || e.kind === 'sleep') && (e.kind === 'sleep' ? e.hours : e.sleep) >= 7).map(e => e.date)).size;
   const moodDays = wk.filter(e => e.kind === 'mood').length;
 
   main.innerHTML = `
+  ${sleepCard(t)}
   <div class="card ${bad ? 'badday' : ''}">
     <h2>나쁜 날 모드 <button class="small ${bad ? '' : 'ghost'}" id="badBtn">${bad ? '켜짐' : '꺼짐'}</button></h2>
     <div class="muted">${bad ? '오늘은 최소 루틴만: 10분 걷기 · 물 2잔 · 일찍 자기. 이것도 기록이 쌓이는 날이에요.' : '아무것도 하기 싫은 날엔 켜세요. 오늘 할 일이 10분 걷기 하나로 줄어요.'}</div>
@@ -429,7 +430,7 @@ function renderToday() {
     <div class="muted" style="margin-top:8px">일주일에 운동 4일이면 성공이에요. 매일 할 필요 없어요.</div>
   </div>`;
 
-  bindGrow();
+  bindGrow(); bindSleep();
   $('#badBtn').onclick = () => { S.badDay = bad ? '' : t; saveS(); render(); };
   $('#wLog').onclick = () => logWorkout(ptype === 'rest' ? 'walk' : ptype, bad ? 10 : (ptype === 'strength' ? 20 : ptype === 'dojo' ? 60 : 30));
   const gd = $('#goDojo'); if (gd) gd.onclick = () => { TAB = 'dojo'; render(); };
@@ -488,6 +489,49 @@ function bindGrow() {
     });
   });
 }
+// ===== 잠 =====
+const hm = ts => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const sleepOf = d => ENTRIES.find(e => e.kind === 'sleep' && e.date === d);
+function sleepCard(t) {
+  const last = sleepOf(t), h = new Date().getHours();
+  if (S.bedAt) {
+    const ago = (Date.now() - S.bedAt) / 3600000;
+    return `<div class="card" style="background:var(--pri2);border-color:var(--pri2)">
+      <h2>🌅 일어나셨나요?</h2>
+      <div class="ink2">${hm(S.bedAt)}에 누웠어요${ago < 16 ? ` · 지금까지 ${ago.toFixed(1)}시간` : ''}</div>
+      <div class="row" style="margin-top:10px"><button class="ghost" id="slCancel">아직 안 잤어요</button><button class="ghost" id="slFix">시간 고치기</button><button id="slWake">일어났어요</button></div>
+    </div>`;
+  }
+  if (last) return `<div class="card"><h2>😴 지난밤 잠 <span class="muted">${hm(last.bed)} → ${hm(last.wake)}</span></h2>
+    <div class="big">${last.hours}시간</div>${last.hours < 6 ? '<div class="muted">잠이 짧았어요. 오늘은 운동 강도를 낮춰도 괜찮아요.</div>' : ''}</div>`;
+  if (h >= 20 || h < 4) return `<div class="card"><h2>🌙 잘 준비 되셨나요?</h2>
+    <div class="muted" style="margin-bottom:10px">누우면서 눌러 두면, 아침에 앱을 열 때 "일어나셨나요?"로 잠 시간이 기록돼요.</div>
+    <button id="slBed" style="width:100%">자러 가요</button></div>`;
+  return '';
+}
+async function saveSleep(bed, wake) {
+  const hours = Math.round((wake - bed) / 360000) / 10;
+  if (hours <= 0 || hours > 16) return toast('시간을 확인해 주세요');
+  const date = ymd(new Date(wake)), old = sleepOf(date);
+  await put({ id: old?.id || uid(), kind: 'sleep', date, ts: wake, bed, wake, hours, source: 'manual' });
+  S.bedAt = 0; saveS(); await reload(); render();
+  toast(`${hours}시간 잤어요${hours >= 7 ? ' 👍' : ''}`);
+}
+function fixSleep() {
+  const toLocal = ts => { const d = new Date(ts); return `${ymd(d)}T${hm(ts)}`; };
+  openDlg(`<h3 style="margin-top:0">잠 시간 고치기</h3>
+    <label>누운 시간</label><input id="slB" type="datetime-local" value="${toLocal(S.bedAt || Date.now() - 8 * 3600000)}">
+    <label>일어난 시간</label><input id="slW" type="datetime-local" value="${toLocal(Date.now())}">
+    <div class="row" style="margin-top:12px"><button class="ghost" data-close>취소</button><button id="slS">저장</button></div>`,
+    d => d.querySelector('#slS').onclick = () => { d.close(); saveSleep(new Date(d.querySelector('#slB').value).getTime(), new Date(d.querySelector('#slW').value).getTime()); });
+}
+function bindSleep() {
+  const on = (id, f) => { const el = $(id); if (el) el.onclick = f; };
+  on('#slBed', () => { S.bedAt = Date.now(); saveS(); render(); toast('잘 자요 🌙'); });
+  on('#slWake', () => (Date.now() - S.bedAt) / 3600000 > 16 ? fixSleep() : saveSleep(S.bedAt, Date.now()));
+  on('#slFix', fixSleep);
+  on('#slCancel', () => { S.bedAt = 0; saveS(); render(); });
+}
 function helpBox() {
   return `<div class="ai" style="margin-top:10px">오늘 많이 힘든 날이네요. 혼자 버티지 않아도 돼요.<br>
   · 정신건강위기상담 <a href="tel:15770199">1577-0199</a> (24시간)<br>· 자살예방상담 <a href="tel:109">109</a> (24시간)<br>
@@ -498,7 +542,7 @@ function scaleHTML(key, label, val) {
 }
 function moodForm(m = {}) {
   return `${scaleHTML('mood', '기분 (1 바닥 ~ 5 좋음)', m.mood)}${scaleHTML('energy', '에너지', m.energy)}${scaleHTML('stress', '스트레스 (5가 가장 심함)', m.stress)}
-  <label>어젯밤 잠 (시간)</label><input id="mdS" type="number" step="0.5" inputmode="decimal" value="${m.sleep ?? ''}" placeholder="예: 6.5">
+  <label>어젯밤 잠 (시간)</label><input id="mdS" type="number" step="0.5" inputmode="decimal" value="${m.sleep ?? sleepOf(today())?.hours ?? ''}" placeholder="예: 6.5">
   <label>한 줄</label><input id="mdT" value="${esc(m.text || '')}" placeholder="오늘 마음을 한 줄로">
   <button id="mdSave" style="margin-top:12px;width:100%">저장</button>`;
 }
@@ -725,6 +769,7 @@ function renderLog() {
     if (e.kind === 'mood') return `🧠 기분 ${e.mood} · 에너지 ${e.energy} · 스트레스 ${e.stress}${e.sleep != null ? ` · 잠 ${e.sleep}h` : ''}${e.text ? ' · ' + esc(e.text) : ''}`;
     if (e.kind === 'body') return `⚖️ ${e.weight}kg${e.fat ? ` · 체지방 ${e.fat}%` : ''}${e.muscle ? ` · 근육 ${e.muscle}kg` : ''}`;
     if (e.kind === 'grow') return `${GROW[e.area].icon} ${GROW[e.area].name} ${e.pages != null ? e.pages + '쪽' : e.min + '분'}${e.note ? ' · ' + esc(e.note) : ''}`;
+    if (e.kind === 'sleep') return `😴 잠 ${hm(e.bed)} → ${hm(e.wake)} · ${e.hours}시간`;
     if (e.kind === 'photo') return `📸 눈바디 (${{ front: '정면', side: '측면', back: '후면' }[e.pose]})`;
     return e.kind;
   };
@@ -776,7 +821,7 @@ function renderSet() {
     <h2>연동 (다음 버전)</h2>
     <div class="muted">갤럭시워치 · 인바디 체중계 → 삼성 헬스 → Health Connect → 이 앱으로 자동 연결 예정이에요. 지금은 운동·체중을 직접 입력해 주세요.</div>
   </div>
-  <div class="muted" style="text-align:center;margin:16px 0">돼지탈출 v0.1</div>`;
+  <div class="muted" style="text-align:center;margin:16px 0">돼지탈출 v0.1.1</div>`;
 
   $('#sCalc').onclick = () => { $('#sP').value = Math.round((+$('#sG').value || 75) * 1.6); };
   $('#sSave').onclick = () => { S.goalWeight = +$('#sG').value || 75; S.proteinTarget = +$('#sP').value || 120; S.startDate = $('#sD').value || S.startDate; S.focus = $('#sF').value; saveS(); toast('저장했어요'); };
