@@ -170,8 +170,8 @@ const PHASES = [
     4: ['strength', STRENGTH.B], 5: ['walk', '빠른 걷기 30분'], 6: ['dojo', '도장 사다리 다음 칸 + 걷기 20분'],
     0: ['rest', '쉬는 날 — 가벼운 산책이면 충분']}},
   { name: '2단계 · 도장 적응', until: 12, plan: {
-    1: ['dojo', '도장 (또는 사다리 다음 칸)'], 2: ['strength', STRENGTH.A], 3: ['walk', '빠른 걷기 40분'],
-    4: ['dojo', '도장 (또는 사다리 다음 칸)'], 5: ['strength', STRENGTH.B], 6: ['walk', '걷기 40분 또는 도장'],
+    1: ['dojo', '도장·테니스·축구 중 하나 (또는 사다리 다음 칸)'], 2: ['strength', STRENGTH.A], 3: ['walk', '빠른 걷기 40분'],
+    4: ['dojo', '도장·테니스·축구 중 하나 (또는 사다리 다음 칸)'], 5: ['strength', STRENGTH.B], 6: ['walk', '등산·걷기·슬로우조깅 중 40분'],
     0: ['rest', '쉬는 날']}},
   { name: '3단계 · 퍼포먼스', until: 9999, plan: {
     1: ['dojo', '도장'], 2: ['strength', STRENGTH.A], 3: ['dojo', '도장'],
@@ -179,7 +179,10 @@ const PHASES = [
     0: ['rest', '쉬는 날']}}
 ];
 const phase = () => PHASES.find(p => weekNo() <= p.until);
-const WTYPE = { walk: '걷기', strength: '근력', dojo: '도장', other: '기타', rest: '휴식' };
+const WTYPE = { walk: '걷기', slowjog: '슬로우조깅', jog: '조깅', hike: '등산', gym: '헬스', strength: '맨몸 근력', dojo: 'MMA 도장', tennis: '테니스', soccer: '축구', other: '기타', rest: '휴식' };
+const WPICK = ['walk', 'slowjog', 'jog', 'hike', 'gym', 'strength', 'dojo', 'tennis', 'soccer', 'other'];
+const RPE = { 1: '가볍게', 2: '적당히', 3: '힘들게' };
+const noteLabel = t => t === 'dojo' ? '오늘 배운 기술 (예: 잽-크로스, 더블레그)' : (t === 'tennis' || t === 'soccer') ? '오늘 한 것 (예: 포핸드 랠리, 패스 연습)' : t === 'gym' ? '한 운동 (예: 레그프레스, 랫풀다운)' : '메모';
 
 const LADDER = [
   ['MMA 기초 수업 영상 1개 보기', '유튜브에서 "MMA 초보 첫 수업" 정도로 검색. 10분이면 끝.'],
@@ -340,13 +343,13 @@ function logWorkout(type = 'walk', min = 30, note = '') {
   openDlg(`
     <h3 style="margin-top:0">운동 기록</h3>
     <label>종류</label>
-    <select id="wT">${['walk', 'strength', 'dojo', 'other'].map(t => `<option value="${t}" ${t === type ? 'selected' : ''}>${WTYPE[t]}</option>`).join('')}</select>
+    <select id="wT">${WPICK.map(t => `<option value="${t}" ${t === type ? 'selected' : ''}>${WTYPE[t]}</option>`).join('')}</select>
     <label>시간(분)</label><input id="wM" type="number" inputmode="numeric" value="${min}">
-    <label id="wNL">${type === 'dojo' ? '오늘 배운 기술 (예: 잽-크로스, 더블레그)' : '메모'}</label>
+    <label id="wNL">${noteLabel(type)}</label>
     <textarea id="wN">${esc(note)}</textarea>
     <div class="row" style="margin-top:12px"><button class="ghost" data-close>취소</button><button id="wSave">저장</button></div>
   `, d => {
-    d.querySelector('#wT').onchange = ev => d.querySelector('#wNL').textContent = ev.target.value === 'dojo' ? '오늘 배운 기술 (예: 잽-크로스, 더블레그)' : '메모';
+    d.querySelector('#wT').onchange = ev => d.querySelector('#wNL').textContent = noteLabel(ev.target.value);
     d.querySelector('#wSave').onclick = async () => {
       await put({ id: uid(), kind: 'workout', date: today(), ts: Date.now(), type: d.querySelector('#wT').value, min: +d.querySelector('#wM').value || 0, note: d.querySelector('#wN').value.trim() });
       await reload(); d.close(); render(); toast('기록했어요. 잘했어요 👏');
@@ -376,7 +379,9 @@ function renderToday() {
   const moodDays = wk.filter(e => e.kind === 'mood').length;
 
   main.innerHTML = `
+  ${askCard()}
   ${sleepCard(t)}
+  ${activityCard(t)}
   <div class="card ${bad ? 'badday' : ''}">
     <h2>나쁜 날 모드 <button class="small ${bad ? '' : 'ghost'}" id="badBtn">${bad ? '켜짐' : '꺼짐'}</button></h2>
     <div class="muted">${bad ? '오늘은 최소 루틴만: 10분 걷기 · 물 2잔 · 일찍 자기. 이것도 기록이 쌓이는 날이에요.' : '아무것도 하기 싫은 날엔 켜세요. 오늘 할 일이 10분 걷기 하나로 줄어요.'}</div>
@@ -385,7 +390,8 @@ function renderToday() {
   <div class="card">
     <h2>💪 오늘의 운동 <span class="tag">${WTYPE[ptype]}</span></h2>
     <div style="margin-bottom:10px">${esc(ptext)}</div>
-    ${works.length ? works.map(w => `<div class="done">✓ ${WTYPE[w.type]} ${w.min}분${w.note ? ' · ' + esc(w.note) : ''}</div>`).join('') : ''}
+    ${works.length ? works.map(w => `<div class="done">✓ ${WTYPE[w.type]} ${w.min}분${w.rpe ? ' · ' + RPE[w.rpe] : ''}${w.source === 'hc' ? ' · 워치' : ''}${w.note ? ' · ' + esc(w.note) : ''}</div>`).join('') : ''}
+    ${!works.length && NATIVE && hcHas('READ_EXERCISE') ? '<div class="muted">워치로 운동을 시작하면 자동으로 기록돼요.</div>' : ''}
     <div class="row" style="margin-top:10px">
       ${ptype === 'rest' ? `<button class="ghost" id="wLog">그래도 움직였어요</button>` : `<button id="wLog">${works.length ? '하나 더 기록' : '했어요'}</button>`}
     </div>
@@ -430,7 +436,7 @@ function renderToday() {
     <div class="muted" style="margin-top:8px">일주일에 운동 4일이면 성공이에요. 매일 할 필요 없어요.</div>
   </div>`;
 
-  bindGrow(); bindSleep();
+  bindGrow(); bindSleep(); bindActivity(); bindAsk();
   $('#badBtn').onclick = () => { S.badDay = bad ? '' : t; saveS(); render(); };
   $('#wLog').onclick = () => logWorkout(ptype === 'rest' ? 'walk' : ptype, bad ? 10 : (ptype === 'strength' ? 20 : ptype === 'dojo' ? 60 : 30));
   const gd = $('#goDojo'); if (gd) gd.onclick = () => { TAB = 'dojo'; render(); };
@@ -491,7 +497,7 @@ function bindGrow() {
 }
 // ===== 잠 =====
 const hm = ts => { const d = new Date(ts); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
-const sleepOf = d => ENTRIES.find(e => e.kind === 'sleep' && e.date === d);
+const sleepOf = d => { const l = ENTRIES.filter(e => e.kind === 'sleep' && e.date === d); return l.find(e => e.source === 'watch') || l[0]; };
 function sleepCard(t) {
   const last = sleepOf(t), h = new Date().getHours();
   if (S.bedAt) {
@@ -503,8 +509,8 @@ function sleepCard(t) {
     </div>`;
   }
   if (last) return `<div class="card"><h2>😴 지난밤 잠 <span class="muted">${hm(last.bed)} → ${hm(last.wake)}</span></h2>
-    <div class="big">${last.hours}시간</div>${last.hours < 6 ? '<div class="muted">잠이 짧았어요. 오늘은 운동 강도를 낮춰도 괜찮아요.</div>' : ''}</div>`;
-  if (h >= 20 || h < 4) return `<div class="card"><h2>🌙 잘 준비 되셨나요?</h2>
+    <div class="big">${last.hours}시간 ${last.source === 'watch' ? '<span class="tag">워치</span>' : ''}</div>${last.hours < 6 ? '<div class="muted">잠이 짧았어요. 오늘은 운동 강도를 낮춰도 괜찮아요.</div>' : ''}</div>`;
+  if ((h >= 20 || h < 4) && !hcHas('READ_SLEEP')) return `<div class="card"><h2>🌙 잘 준비 되셨나요?</h2>
     <div class="muted" style="margin-bottom:10px">누우면서 눌러 두면, 아침에 앱을 열 때 "일어나셨나요?"로 잠 시간이 기록돼요.</div>
     <button id="slBed" style="width:100%">자러 가요</button></div>`;
   return '';
@@ -512,7 +518,7 @@ function sleepCard(t) {
 async function saveSleep(bed, wake) {
   const hours = Math.round((wake - bed) / 360000) / 10;
   if (hours <= 0 || hours > 16) return toast('시간을 확인해 주세요');
-  const date = ymd(new Date(wake)), old = sleepOf(date);
+  const date = ymd(new Date(wake)), old = ENTRIES.find(e => e.kind === 'sleep' && e.date === date && e.source === 'manual');
   await put({ id: old?.id || uid(), kind: 'sleep', date, ts: wake, bed, wake, hours, source: 'manual' });
   S.bedAt = 0; saveS(); await reload(); render();
   toast(`${hours}시간 잤어요${hours >= 7 ? ' 👍' : ''}`);
@@ -531,6 +537,138 @@ function bindSleep() {
   on('#slWake', () => (Date.now() - S.bedAt) / 3600000 > 16 ? fixSleep() : saveSleep(S.bedAt, Date.now()));
   on('#slFix', fixSleep);
   on('#slCancel', () => { S.bedAt = 0; saveS(); render(); });
+}
+// ===== 자동 연동 (안드로이드 앱 + Health Connect) =====
+const APK_URL = 'https://github.com/actor0211/pig-escape/releases/latest/download/pig-escape.apk';
+const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const HB = NATIVE ? (window.Capacitor.Plugins && window.Capacitor.Plugins.HealthBridge) || window.Capacitor.registerPlugin('HealthBridge') : null;
+const HC = { status: NATIVE ? 'checking' : 'web', all: false, granted: [], error: '', lastSync: +localStorage.getItem('pigescape-sync') || 0 };
+const hcHas = k => HC.granted.some(g => g.endsWith(k));
+// Health Connect 운동 종류 번호 → 앱 분류
+const EX_NAME = { 0: '운동', 79: '걷기', 37: '하이킹', 56: '달리기', 57: '러닝머신', 8: '자전거', 9: '실내 자전거', 25: '일립티컬', 44: '무술', 11: '복싱', 76: '테니스', 64: '축구', 70: '근력 운동', 81: '웨이트', 13: '맨몸 운동', 36: '인터벌', 83: '요가', 74: '수영', 69: '천국의 계단', 54: '로잉머신' };
+const exType = n => ({ 79: 'walk', 37: 'hike', 56: 'jog', 57: 'jog', 44: 'dojo', 11: 'dojo', 76: 'tennis', 64: 'soccer', 70: 'gym', 81: 'gym', 13: 'strength' })[n] || 'other';
+function hcStatusText() {
+  if (HC.status === 'unavailable') return 'Health Connect가 없어요. 아래 설정 버튼으로 설치해 주세요.';
+  if (HC.status === 'update_required') return 'Health Connect 업데이트가 필요해요.';
+  if (HC.status === 'checking') return '확인 중…';
+  if (!HC.granted.length) return '아직 연결 안 됨 — "연결하기"를 눌러 권한을 허용해 주세요.';
+  return `연결됨 (${HC.all ? '전체' : '일부'} 권한)${HC.lastSync ? ` · 마지막 가져오기 ${new Date(HC.lastSync).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ''}${HC.error ? ` · 오류: ${esc(HC.error)}` : ''}`;
+}
+async function hcAsk() {
+  try {
+    const st = await HB.askPermissions();
+    Object.assign(HC, { status: st.status, all: st.all, granted: st.granted || [] });
+    if (HC.granted.length) await hcSync(14, true); else render();
+  } catch (e) { toast('연결 실패: ' + (e.message || e)); HB.openSettings().catch(() => {}); }
+}
+let hcBusy = false;
+async function hcSync(days = 3, loud = false) {
+  if (!HB || hcBusy) return;
+  hcBusy = true;
+  try {
+    const st = await HB.status();
+    Object.assign(HC, { status: st.status, all: st.all, granted: st.granted || [], error: '' });
+    if (st.status !== 'available' || !HC.granted.length) return;
+    const d0 = parseD(today()); d0.setDate(d0.getDate() - (days - 1));
+    const from = d0.getTime();
+    const r = await HB.read({ start: from - 12 * 3600000, end: Date.now() });
+    const per = {};
+    r.steps.forEach(b => { if (b.start < from) return; const d = new Date(b.start), k = ymd(d); (per[k] = per[k] || Array(24).fill(0))[d.getHours()] += b.steps; });
+    for (const [date, hourly] of Object.entries(per))
+      await put({ id: 'act-' + date, kind: 'activity', date, ts: parseD(date).getTime() + 1, hourly, steps: hourly.reduce((a, b) => a + b, 0), source: 'hc' });
+    for (const x of r.exercise) {
+      const min = Math.round((x.end - x.start) / 60000);
+      if (x.start < from || min < 5) continue;
+      const id = 'hc-ex-' + x.id, old = ENTRIES.find(e => e.id === id), date = ymd(new Date(x.start));
+      await put(old ? { ...old, date, ts: x.start, min, end: x.end }
+        : { id, kind: 'workout', date, ts: x.start, end: x.end, type: exType(x.type), min, hcType: x.type, watchName: x.title || EX_NAME[x.type] || '운동', note: '', source: 'hc', confirmed: false });
+    }
+    for (const x of r.sleep) {
+      const hours = Math.round((x.end - x.start) / 360000) / 10;
+      if (hours < 2) continue;
+      await put({ id: 'hc-sl-' + x.id, kind: 'sleep', date: ymd(new Date(x.end)), ts: x.end, bed: x.start, wake: x.end, hours, source: 'watch' });
+    }
+    for (const w of r.weight) {
+      if (w.time < from) continue;
+      const f = r.bodyFat.find(f => Math.abs(f.time - w.time) < 600000);
+      await put({ id: 'hc-w-' + w.id, kind: 'body', date: ymd(new Date(w.time)), ts: w.time, weight: Math.round(w.kg * 10) / 10, fat: f ? Math.round(f.pct * 10) / 10 : null, muscle: null, source: 'hc' });
+    }
+    HC.lastSync = Date.now(); localStorage.setItem('pigescape-sync', HC.lastSync);
+    await reload();
+    if (S.bedAt && sleepOf(today())?.source === 'watch') { S.bedAt = 0; saveS(); }
+    if (loud) toast('삼성 헬스 기록을 가져왔어요');
+  } catch (e) {
+    HC.error = e.message || String(e);
+    if (loud) toast('가져오기 실패: ' + HC.error);
+  } finally {
+    hcBusy = false;
+    if (TAB === 'today' || TAB === 'set' || TAB === 'body') render();
+  }
+}
+const STEP_GOAL = 7000;
+function activityCard(t) {
+  const a = ENTRIES.find(e => e.kind === 'activity' && e.date === t);
+  if (!a) {
+    if (!NATIVE || HC.granted.length || HC.status === 'checking') return '';
+    return `<div class="card"><h2>🚶 자동 기록 켜기</h2><div class="muted">걸음·운동·잠·체중을 갤럭시워치와 폰에서 자동으로 가져와요.</div><button id="hcAsk" style="width:100%;margin-top:10px">연결하기</button></div>`;
+  }
+  const nowH = new Date().getHours(), to = t === today() ? Math.min(21, nowH - 1) : 21;
+  let still = 0; for (let h = 9; h <= to; h++) if (a.hourly[h] < 250) still++;
+  const exMin = byDate(t, 'workout').filter(w => w.source === 'hc').reduce((s, w) => s + w.min, 0);
+  const pct = Math.min(100, a.steps / STEP_GOAL * 100);
+  const H0 = 6, max = Math.max(500, ...a.hourly.slice(H0)), W = 340, BH = 56, bw = W / (24 - H0);
+  return `<div class="card">
+    <h2>🚶 오늘 활동 <span class="tag">자동</span></h2>
+    <div class="row" style="align-items:flex-end"><div><span class="big">${a.steps.toLocaleString()}</span> <span class="muted">/ ${STEP_GOAL.toLocaleString()}보</span></div></div>
+    <div style="height:8px;background:var(--bg);border-radius:4px;margin:8px 0 12px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pri);border-radius:4px"></div></div>
+    <svg viewBox="0 0 ${W} ${BH + 16}" width="100%" role="img" aria-label="시간별 걸음 수">
+      ${a.hourly.slice(H0).map((v, i) => { const h = Math.max(v ? 2 : 0, v / max * BH); return `<rect x="${i * bw + 2}" y="${BH - h}" width="${bw - 4}" height="${h}" rx="3" fill="var(--pri)"/><rect class="hb" data-h="${i + H0}" data-v="${v}" x="${i * bw}" y="0" width="${bw}" height="${BH}" fill="transparent"/>`; }).join('')}
+      <line x1="0" x2="${W}" y1="${BH}" y2="${BH}" stroke="var(--line)"/>
+      ${[6, 9, 12, 15, 18, 21].map(h => `<text x="${(h - H0) * bw + bw / 2}" y="${BH + 13}" text-anchor="middle" font-size="10" fill="var(--muted)">${h}시</text>`).join('')}
+    </svg>
+    <div class="muted" id="hbCap" style="margin-top:4px">막대를 누르면 그 시간 걸음 수가 보여요.</div>
+    <div class="rings" style="grid-template-columns:repeat(2,1fr);margin-top:10px">
+      <div><b>${still}시간</b><span class="muted">거의 안 움직인 시간<br>(9~21시, 시간당 250보 미만)</span></div>
+      <div><b>${exMin}분</b><span class="muted">워치가 잡은 운동</span></div>
+    </div>
+    ${still >= 4 && t === today() ? '<div class="muted" style="margin-top:8px">오래 앉아 있었어요. 5분만 일어나 걸어도 달라져요.</div>' : ''}
+  </div>`;
+}
+function bindActivity() {
+  const ask = $('#hcAsk'); if (ask) ask.onclick = hcAsk;
+  main.querySelectorAll('.hb').forEach(r => r.onclick = () => { $('#hbCap').textContent = `${r.dataset.h}시: ${(+r.dataset.v).toLocaleString()}보`; });
+}
+// 워치가 잡은 운동 → "무슨 운동이었나요?" 한 번에 답하기
+function askCard() {
+  const since = Date.now() - 3 * 86400000;
+  const pend = ENTRIES.filter(e => e.kind === 'workout' && e.source === 'hc' && !e.confirmed && e.ts > since).sort((a, b) => b.ts - a.ts);
+  if (!pend.length) return '';
+  const w = pend[0];
+  return `<div class="card" id="askCard" data-id="${w.id}" style="border:2px solid var(--pri)">
+    <h2>🏃 방금 운동하셨네요! ${pend.length > 1 ? `<span class="muted">외 ${pend.length - 1}개</span>` : ''}</h2>
+    <div class="ink2">${w.date === today() ? '오늘' : fmtDay(w.date)} ${hm(w.ts)}${w.end ? '~' + hm(w.end) : ''} · <b>${w.min}분</b> · 워치: ${esc(w.watchName || '')}</div>
+    <label>무슨 운동이었나요?</label>
+    <div class="scale" style="flex-wrap:wrap" data-key="type">${WPICK.map(k => `<button type="button" style="flex:0 0 calc(33.3% - 4px)" class="${w.type === k ? 'on' : ''}" data-v="${k}">${WTYPE[k]}</button>`).join('')}</div>
+    <label>얼마나 힘들었나요?</label>
+    <div class="scale" data-key="rpe">${[1, 2, 3].map(n => `<button type="button" data-v="${n}">${RPE[n]}</button>`).join('')}</div>
+    <label id="askNL">${noteLabel(w.type)}</label><input id="askN" placeholder="한 줄 (안 써도 돼요)">
+    <div class="row" style="margin-top:12px"><button class="ghost" id="askNo">운동 아니었어요</button><button id="askOk">저장</button></div>
+  </div>`;
+}
+function bindAsk() {
+  const card = $('#askCard'); if (!card) return;
+  const w = ENTRIES.find(e => e.id === card.dataset.id), val = { type: w.type, rpe: null };
+  card.querySelectorAll('.scale').forEach(sc => sc.onclick = ev => {
+    const b = ev.target.closest('button'); if (!b) return;
+    val[sc.dataset.key] = sc.dataset.key === 'rpe' ? +b.dataset.v : b.dataset.v;
+    sc.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    if (sc.dataset.key === 'type') $('#askNL').textContent = noteLabel(val.type);
+  });
+  $('#askOk').onclick = async () => {
+    await put({ ...w, type: val.type, rpe: val.rpe, note: $('#askN').value.trim(), confirmed: true });
+    await reload(); render(); toast('기록했어요. 잘했어요 👏');
+  };
+  $('#askNo').onclick = async () => { await put({ ...w, kind: 'ignored', confirmed: true }); await reload(); render(); };
 }
 function helpBox() {
   return `<div class="ai" style="margin-top:10px">오늘 많이 힘든 날이네요. 혼자 버티지 않아도 돼요.<br>
@@ -769,6 +907,7 @@ function renderLog() {
     if (e.kind === 'mood') return `🧠 기분 ${e.mood} · 에너지 ${e.energy} · 스트레스 ${e.stress}${e.sleep != null ? ` · 잠 ${e.sleep}h` : ''}${e.text ? ' · ' + esc(e.text) : ''}`;
     if (e.kind === 'body') return `⚖️ ${e.weight}kg${e.fat ? ` · 체지방 ${e.fat}%` : ''}${e.muscle ? ` · 근육 ${e.muscle}kg` : ''}`;
     if (e.kind === 'grow') return `${GROW[e.area].icon} ${GROW[e.area].name} ${e.pages != null ? e.pages + '쪽' : e.min + '분'}${e.note ? ' · ' + esc(e.note) : ''}`;
+    if (e.kind === 'activity') return `🚶 걸음 ${e.steps.toLocaleString()}보 · 자동`;
     if (e.kind === 'sleep') return `😴 잠 ${hm(e.bed)} → ${hm(e.wake)} · ${e.hours}시간`;
     if (e.kind === 'photo') return `📸 눈바디 (${{ front: '정면', side: '측면', back: '후면' }[e.pose]})`;
     return e.kind;
@@ -776,7 +915,7 @@ function renderLog() {
   main.innerHTML = Object.keys(groups).length ? Object.keys(groups).sort().reverse().map(d => `
     <div class="daytitle">${fmtDay(d)}</div>
     <div class="card" style="margin-top:4px;padding:4px 16px">
-      ${groups[d].map(e => `<div class="list-item">${e.img ? `<img src="${e.img}">` : ''}<div class="grow">${line(e)}</div><button class="danger" data-del="${e.id}">지우기</button></div>`).join('')}
+      ${groups[d].map(e => `<div class="list-item">${e.img ? `<img src="${e.img}">` : ''}<div class="grow">${line(e)}</div>${e.source === 'hc' || e.source === 'watch' ? '<span class="muted">자동</span>' : `<button class="danger" data-del="${e.id}">지우기</button>`}</div>`).join('')}
     </div>`).join('') : '<div class="card muted">아직 기록이 없어요. 오늘 탭에서 시작해요.</div>';
   main.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
     if (!confirm('이 기록을 지울까요? 되돌릴 수 없어요.')) return;
@@ -818,11 +957,18 @@ function renderSet() {
   </div>
 
   <div class="card">
-    <h2>연동 (다음 버전)</h2>
-    <div class="muted">갤럭시워치 · 인바디 체중계 → 삼성 헬스 → Health Connect → 이 앱으로 자동 연결 예정이에요. 지금은 운동·체중을 직접 입력해 주세요.</div>
+    <h2>워치·인바디 자동 연동</h2>
+    ${NATIVE ? `<div class="ink2">${hcStatusText()}</div>
+      <div class="row" style="margin-top:10px"><button id="hcAsk2">${HC.all ? '권한 다시 보기' : '연결하기'}</button><button class="ghost" id="hcSync">지금 가져오기</button></div>
+      <button class="ghost small" id="hcSet" style="margin-top:8px">Health Connect 설정 열기</button>
+      <div class="muted" style="margin-top:8px">삼성 헬스 → 설정 → Health Connect 에서 걸음·운동·수면·체중 공유를 켜 두어야 들어와요.</div>`
+    : `<div class="muted">갤럭시워치·인바디가 삼성 헬스에 기록한 걸음·운동·잠·체중을 자동으로 가져오려면 <b>안드로이드 앱 버전</b>이 필요해요. (웹앱은 건강 데이터를 읽을 수 없어요)</div>
+      <a class="btn" style="display:block;text-align:center;text-decoration:none;margin-top:10px" href="${APK_URL}">안드로이드 앱 받기</a>
+      <div class="muted" style="margin-top:8px">설치 후엔 그 앱만 쓰세요. 지금 기록은 "백업 파일 받기" → 앱에서 "백업 불러오기"로 옮길 수 있어요.</div>`}
   </div>
-  <div class="muted" style="text-align:center;margin:16px 0">돼지탈출 v0.1.1</div>`;
+  <div class="muted" style="text-align:center;margin:16px 0">돼지탈출 v0.2</div>`;
 
+  if (NATIVE) { $('#hcAsk2').onclick = hcAsk; $('#hcSync').onclick = () => hcSync(14, true); $('#hcSet').onclick = () => HB.openSettings().catch(e => toast(e.message)); }
   $('#sCalc').onclick = () => { $('#sP').value = Math.round((+$('#sG').value || 75) * 1.6); };
   $('#sSave').onclick = () => { S.goalWeight = +$('#sG').value || 75; S.proteinTarget = +$('#sP').value || 120; S.startDate = $('#sD').value || S.startDate; S.focus = $('#sF').value; saveS(); toast('저장했어요'); };
   $('#sKSave').onclick = () => { S.apiKey = $('#sK').value.trim(); saveS(); toast(S.apiKey ? '키를 저장했어요' : '키를 지웠어요'); };
@@ -847,6 +993,10 @@ function renderSet() {
 // ===== 시작 =====
 (async () => {
   await reload(); render();
+  if (NATIVE) {
+    hcSync(HC.lastSync ? 3 : 14);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - HC.lastSync > 5 * 60000) hcSync(2); });
+  }
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 })();
 </script>
